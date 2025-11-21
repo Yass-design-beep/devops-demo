@@ -1,6 +1,6 @@
 # DevOps Demo App
-
-Application Laravel simple pour la démonstration DevOps.
+APP
+Application Laravel simple pour la demonstration DevOps.
 
 ## Installation
 

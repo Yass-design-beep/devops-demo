@@ -1,0 +1,90 @@
+name: CI - Test & Build
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main", "develop"]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Récupération du code
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      # 2. Installer PHP + extensions
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: mbstring, intl, pdo_mysql
+          coverage: none
+
+      # 3. Installer les dépendances composer
+      - name: Installer dépendances PHP
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      # 4. Préparer configuration Laravel
+      - name: Copier .env de test
+        run: cp .env.example .env
+
+      - name: Générer APP_KEY
+        run: php artisan key:generate
+
+      # 5. Base SQLite
+      - name: Préparer base SQLite
+        run: |
+          mkdir -p database
+          touch database/database.sqlite
+
+      # 6. Migrations
+      - name: Lancer les migrations
+        run: php artisan migrate --force
+
+      # 7. Exécuter les tests
+      - name: Exécuter tests PHPUnit
+        run: php artisan test --without-tty
+
+      # 8. Analyse code Laravel Pint (optionnel)
+      - name: Analyse code via Laravel Pint
+        run: ./vendor/bin/pint --test
+        continue-on-error: true
+
+      # 9. Analyse statique PHPStan (optionnel)
+      - name: Analyse statique PHPStan
+        if: ${{ always() }}
+        run: |
+          if [ -f ./vendor/bin/phpstan ]; then
+            ./vendor/bin/phpstan analyse
+          else
+            echo "PHPStan non installé — skip"
+          fi
+        continue-on-error: true
+
+      # 10. Build frontend si package.json existe
+      - name: Setup Node.js
+        if: ${{ always() }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Installer dépendances npm
+        if: ${{ always() }}
+        run: |
+          if [ -f package.json ]; then
+            npm ci
+          else
+            echo "Pas de package.json — skip npm"
+          fi
+
+      - name: Build Frontend
+        if: ${{ always() }}
+        run: |
+          if [ -f package.json ]; then
+            npm run build
+          else
+            echo "Pas de build frontend"
+          fi

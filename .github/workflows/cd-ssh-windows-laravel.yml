@@ -1,0 +1,74 @@
+name: Deploy Laravel to Windows Server
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PHP
+        uses: shivammathur/setup-php@v3
+        with:
+          php-version: '8.1'
+          extensions: mbstring, pdo, pdo_mysql, openssl
+
+      - name: Install Composer dependencies
+        run: |
+          composer install --no-dev --optimize-autoloader
+
+      - name: Install Node & build assets
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - run: |
+          npm ci
+          npm run build
+
+      - name: Prepare release folder
+        run: |
+          if (Test-Path release) { Remove-Item release -Recurse -Force }
+          New-Item -ItemType Directory -Path release
+          robocopy . release /MIR /XD node_modules .git storage vendor
+          composer install --no-dev --optimize-autoloader --working-dir=release
+
+      - name: Install WinSCP
+        uses: marketplace/actions/winscp-ftp-action@v1
+
+      - name: Upload files via WinSCP
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          winscp.com `
+          /privatekey="$env:KEY" `
+          /command `
+          "open sftp://$env:USER@$env:HOST/ -hostkey=* -privatekey='id_ed25519'" `
+          "put release/* /apps/laravel-staging/" `
+          "exit"
+
+      - name: Remote deploy on Windows Server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            $staging="C:\apps\laravel-staging"
+            $live="C:\apps\laravel-live"
+            cd $staging
+            php artisan migrate --force
+            php artisan config:cache
+            php artisan route:cache
+
+            # swap folders
+            if (Test-Path $live) {
+              Rename-Item $live ($live + "_old_" + (Get-Date -Format yyyyMMddHHmmss))
+            }
+            Rename-Item $staging $live
